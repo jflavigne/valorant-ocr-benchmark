@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -170,6 +171,28 @@ SAVE_FULLSCREEN_ON_KILLFEED = True
 _easyocr_reader = None
 _easyocr_reader_sig: tuple | None = None
 _row_ocr_cache: OrderedDict[tuple, tuple[str, str, str, str]] = OrderedDict()
+
+
+def frame_safe_row_cache_key(crop: np.ndarray, *geometry: object) -> tuple:
+    """Return a cache identity that cannot leak OCR text across different pixels."""
+    if crop is None or crop.size == 0:
+        content_hash = "empty"
+        shape: tuple[int, ...] = ()
+    else:
+        contiguous = np.ascontiguousarray(crop)
+        content_hash = hashlib.sha256(contiguous.tobytes()).hexdigest()
+        shape = tuple(int(value) for value in contiguous.shape)
+    recognition = (
+        DEFAULT_OCR_ENGINE,
+        EASYOCR_ONE_PASS,
+        EASYOCR_STACK_ROWS,
+        _easyocr_detect_network,
+        _EASYOCR_USE_GPU,
+        EASYOCR_CANVAS_SIZE,
+        EASYOCR_MAG_RATIO,
+        EASYOCR_MIN_SIZE,
+    )
+    return (*geometry, shape, content_hash, recognition)
 
 
 @dataclass
@@ -468,12 +491,18 @@ def ocr_killfeed_row_easyocr_one_pass(crop: np.ndarray) -> tuple[str, str, str, 
     return _kv_from_easyocr_detections(results)
 
 
+_easyocr_warmed_signatures: set[tuple[object, ...]] = set()
+
+
 def warm_easyocr_for_session(ocr_engine: str) -> None:
     """Prime detector + recognizer and both single-row and stacked paths (blank readtext is not enough)."""
     eng = (ocr_engine or DEFAULT_OCR_ENGINE).lower()
     if eng not in ("easyocr", "both") or easyocr is None:
         return
     if get_easyocr_reader() is None:
+        return
+    signature = (_easyocr_detect_network, _EASYOCR_USE_GPU)
+    if signature in _easyocr_warmed_signatures:
         return
     h, w = 56, 520
     strip = np.full((h, w, 3), 32, dtype=np.uint8)
@@ -503,6 +532,7 @@ def warm_easyocr_for_session(ocr_engine: str) -> None:
             easyocr_parse_stacked_bands([strip, strip.copy()])
         if torch is not None and _EASYOCR_USE_GPU:
             torch.cuda.synchronize()
+        _easyocr_warmed_signatures.add(signature)
     except Exception:
         pass
 
@@ -959,7 +989,9 @@ def process_frame(
     for (x, y, w, h, row_color) in boxes:
         ex, ey, ew, eh = expand_row_box(x, y, w, h, frame_w, frame_h)
         crop = frame[ey : ey + eh, ex : ex + ew]
-        row_key = (ex >> 2, ey >> 2, ew >> 2, eh >> 2, row_color)
+        row_key = frame_safe_row_cache_key(
+            crop, ex >> 2, ey >> 2, ew >> 2, eh >> 2, row_color, (ocr_engine or DEFAULT_OCR_ENGINE).lower()
+        )
         row_work.append(
             {
                 "row_key": row_key,

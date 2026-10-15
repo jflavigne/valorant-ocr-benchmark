@@ -47,6 +47,18 @@ Multi-template masked NCC for killfeed weapon silhouettes: [`docs/WEAPON_MATCHIN
 ### **6. Unified parser (names + weapons)**
 [`parse_killfeed.py`](parse_killfeed.py) — one pass per `row_bands_frac` row: OCR + optional templates (writes `killfeed_parse.json`). **How it works & library API (`parse_killfeed_image`):** [`docs/UNIFIED_PARSE.md`](docs/UNIFIED_PARSE.md).
 
+### **7. Dense source-time timeline**
+[`dense_killfeed_timeline.py`](dense_killfeed_timeline.py) samples a source video on a deterministic timestamp grid, reuses the existing unified parser and warmed EasyOCR reader, checkpoints observations append-only, and atomically finalizes compressed raw observations plus a compact multi-row timeline.
+
+```bash
+.venv/bin/python dense_killfeed_timeline.py process \
+  --video /path/to/source.mp4 --output /path/to/artifact \
+  --start 0 --end 60 --interval 1 --origin 0
+.venv/bin/python dense_killfeed_timeline.py validate --output /path/to/artifact
+```
+
+The row cache is content-addressed by crop pixels and recognition-affecting configuration so warmed execution cannot reuse stale text across different frames. A complete artifact proves the requested sampling grid and hashes are valid; it does not claim every competitive elimination was detected. Raw frames are not retained by default.
+
 ---
 
 ## How it works (high level)

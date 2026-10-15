@@ -266,7 +266,9 @@ def parse_killfeed_roi_unified(
 
         ex, ey, ew, eh = vkt.expand_row_box(x, y, w, h, frame_w, frame_h)
         crop = roi_bgr[ey : ey + eh, ex : ex + ew]
-        row_key = (ex >> 2, ey >> 2, ew >> 2, eh >> 2, row_color)
+        row_key = vkt.frame_safe_row_cache_key(
+            crop, ex >> 2, ey >> 2, ew >> 2, eh >> 2, row_color, (ocr_engine or vkt.DEFAULT_OCR_ENGINE).lower()
+        )
         killer, victim, raw_l, raw_r = vkt.parse_killer_victim_from_row_crop(
             crop, ocr_engine=ocr_engine, row_cache_key=row_key
         )
